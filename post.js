@@ -43,11 +43,33 @@ async function uploadToChannel(telegram, CHANNEL_ID, meta, selected, posterUrl, 
         if (posterUrl) {
             const posterBuf = await downloadImageBytes(posterUrl);
             if (posterBuf) {
-                await telegram.sendPhoto(CHANNEL_ID, { source: posterBuf }, {
-                    caption: caption,
-                    parse_mode: 'HTML'
-                });
-                console.log(`📤 Posted poster to channel: ${CHANNEL_ID}`);
+                try {
+                    await telegram.sendPhoto(CHANNEL_ID, { source: posterBuf }, {
+                        caption: caption,
+                        parse_mode: 'HTML'
+                    });
+                    console.log(`📤 Posted poster to channel: ${CHANNEL_ID}`);
+                } catch (e) {
+                    // Fallback: if caption too long, retry without actress names
+                    const desc = (e?.response?.description || e.message || '').toLowerCase();
+                    if (desc.includes('caption is too long') || desc.includes('message caption is too long')) {
+                        console.warn('Caption too long — retrying without actress names');
+                        const metaNoAct = Object.assign({}, meta, { actresses: null });
+                        const fallbackCaption = formatMessage(metaNoAct, selected);
+                        try {
+                            await telegram.sendPhoto(CHANNEL_ID, { source: posterBuf }, {
+                                caption: fallbackCaption,
+                                parse_mode: 'HTML'
+                            });
+                            console.log(`📤 Posted poster (fallback caption) to channel: ${CHANNEL_ID}`);
+                        } catch (err2) {
+                            console.error('Fallback poster upload failed:', err2.message || err2);
+                            throw err2;
+                        }
+                    } else {
+                        throw e;
+                    }
+                }
             }
         }
         
