@@ -170,10 +170,117 @@ async function downloadImageBytes(url) {
     } catch { return null; }
 }
 
+async function fetchSearchIdols(query) {
+    try {
+        const resp = await client.get(`https://www.javdatabase.com/?post_type=idols&s=${encodeURIComponent(query)}`);
+        const html = resp.data || '';
+        const results = [];
+        const cardPattern = /<div[^>]+class="[^"]*\bcard\b[^"]*\bborderlesscard\b[^"]*"[^>]*>(.*?)<\/div>/gis;
+        let cardMatch;
+        while ((cardMatch = cardPattern.exec(html)) !== null) {
+            const block = cardMatch[1];
+            let name = null, link = null;
+            const nameMatch = block.match(/<p[^>]+class="[^"]*\bpcard\b[^"]*"[^>]*>.*?<a[^>]+href="([^"]+)"[^>]*>(.*?)<\/a>/is);
+            if (nameMatch) { link = nameMatch[1]; name = cleanHtmlText(nameMatch[2]); }
+            if (!name) {
+                const altMatch = block.match(/<a[^>]*href="([^"]+)"[^>]*>.*?<img[^>]+alt="([^"]+)"/is);
+                if (altMatch) { link = altMatch[1]; name = altMatch[2]; }
+            }
+            results.push({ name, link });
+        }
+        return results.filter(r => r.link);
+    } catch (e) {
+        console.error('Idol search error:', e.message);
+        return [];
+    }
+}
+
+async function fetchSearchStudios(query) {
+    try {
+        const resp = await client.get(`https://www.javdatabase.com/?post_type=studios&s=${encodeURIComponent(query)}`);
+        const html = resp.data || '';
+        const results = [];
+        const cardPattern = /<div[^>]+class="[^"]*\bcard\b[^"]*\bborderlesscard\b[^"]*"[^>]*>(.*?)<\/div>/gis;
+        let cardMatch;
+        while ((cardMatch = cardPattern.exec(html)) !== null) {
+            const block = cardMatch[1];
+            let name = null, link = null;
+            const nameMatch = block.match(/<p[^>]+class="[^"]*\bpcard\b[^"]*"[^>]*>.*?<a[^>]+href="([^\"]+)"[^>]*>(.*?)<\/a>/is);
+            if (nameMatch) { link = nameMatch[1]; name = cleanHtmlText(nameMatch[2]); }
+            if (!name) {
+                const altMatch = block.match(/<a[^>]*href="([^\"]+)"[^>]*>.*?<img[^>]+alt="([^"]+)"/is);
+                if (altMatch) { link = altMatch[1]; name = altMatch[2]; }
+            }
+            if (link) {
+                link = link.trim();
+                if (link.startsWith('/')) link = `https://www.javdatabase.com${link}`;
+            }
+            results.push({ name, link });
+        }
+        return results.filter(r => r.link);
+    } catch (e) {
+        console.error('Studio search error:', e.message);
+        return [];
+    }
+}
+
+async function fetchIdolMovies(idolUrl) {
+    try {
+        const resp = await client.get(idolUrl);
+        const html = resp.data || '';
+        const results = [];
+        const cardPattern = /<div[^>]+class="[^"]*\bcard\b[^"]*\bborderlesscard\b[^"]*"[^>]*>(.*?)<\/div>/gis;
+        let cardMatch;
+        while ((cardMatch = cardPattern.exec(html)) !== null) {
+            const block = cardMatch[1];
+            let code = null, link = null, title = null, releaseDate = null;
+            const codeMatch = block.match(/<p[^>]+class="[^"]*\bpcard\b[^"]*"[^>]*>.*?<a[^>]+href="([^"]+)"[^>]*>(.*?)<\/a>/is);
+            if (codeMatch) { link = codeMatch[1]; code = cleanHtmlText(codeMatch[2]); }
+            // Normalize and restrict to javdatabase domain only
+            if (link) {
+                link = link.trim();
+                if (link.startsWith('/')) {
+                    link = `https://www.javdatabase.com${link}`;
+                }
+                // Skip any external links not on javdatabase.com
+                if (!link.includes('javdatabase.com')) {
+                    continue;
+                }
+            }
+            const titleBlock = block.match(/<(?:div|p|span)[^>]+class="[^"]*\bmt-auto\b[^"]*"[^>]*>(.*?)<\/(?:div|p|span)>/is);
+            if (titleBlock) {
+                const t = titleBlock[1].match(/<a[^>]*>(.*?)<\/a>/i);
+                if (t) title = cleanHtmlText(t[1]);
+            }
+            if (!title) title = code;
+            const dateMatch = cleanHtmlText(block).match(/(\d{4}-\d{2}-\d{2})/);
+            if (dateMatch) releaseDate = dateMatch[1];
+            results.push({ code, title, link, date: releaseDate });
+        }
+        // Remove duplicates and ensure valid javdatabase links
+        const seen = new Set();
+        const filtered = [];
+        for (const r of results) {
+            if (!r.link) continue;
+            const key = r.link;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            filtered.push(r);
+        }
+        return filtered;
+    } catch (e) {
+        console.error('Idol movies error:', e.message);
+        return [];
+    }
+}
+
 module.exports = {
     fetchSearch,
     fetchMovieMetadata,
     fetchPosterUrl,
     fetchPreviewImages,
-    downloadImageBytes
+    downloadImageBytes,
+    fetchSearchIdols,
+    fetchSearchStudios,
+    fetchIdolMovies
 };

@@ -15,8 +15,7 @@ module.exports = {
             process.exit(1);
         }
         if (!this.CHANNEL_ID) {
-            console.error('❌ Error: CHANNEL_ID not set in .env!');
-            process.exit(1);
+            console.warn('⚠️ Warning: CHANNEL_ID not set in .env. Channel uploads will be disabled until set.');
         }
         console.log('✅ Configuration loaded successfully');
         console.log(`📢 Channel: ${this.CHANNEL_ID}`);

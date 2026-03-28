@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: javtg-bot
+    env: node
+    plan: free
+    branch: V2
+    buildCommand: "npm install"
+    startCommand: "npm start"
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "3000"
+# NOTE: Do NOT commit secrets here. Set the following secrets in the Render dashboard:
+# - BOT_TOKEN
+# - CHANNEL_ID
+# - ADMIN_IDS
+# - AUTO_DELETE_SECONDS (optional)
+# You can also override PORT from Render's settings if needed.

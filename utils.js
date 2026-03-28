@@ -1,6 +1,7 @@
 // utils.js
 
 // ✅ Define escapeHtml FIRST
+const AUTO_DELETE_SECONDS = parseInt(process.env.AUTO_DELETE_SECONDS || '60', 10) || 60;
 function escapeHtml(text) {
     if (!text) return '';
     return String(text)
@@ -28,7 +29,7 @@ function formatHashtags(items, prefix = '') {
         .filter(g => g)
         .map(g => {
             const tag = g.replace(/\s+/g, '').replace(/[^a-zA-Z0-9_]/g, '');
-            return `#${prefix}${tag}`;
+            return `${prefix}${tag}`;
         })
         .join(' ');
 }
@@ -59,22 +60,13 @@ function formatMessage(meta, selected) {
     if (meta.director) lines.push(`🎥 <b>Director:</b> ${escapeHtml(meta.director)}`);
     if (meta.actresses) {
         lines.push(`👥 <b>Actresses:</b> ${escapeHtml(meta.actresses)}`);
-        lines.push(`   ${formatHashtags(meta.actresses, 'Actress_')}`);
     }
     lines.push('');
     
     if (meta.genres) {
         lines.push(`🎭 <b>Genres:</b> ${escapeHtml(meta.genres)}`);
-        lines.push(`   ${formatHashtags(meta.genres, 'Genre_')}`);
     }
     lines.push('');
-    
-    if (meta.plot) {
-        const plot = meta.plot.length > 400 ? meta.plot.slice(0, 400) + '...' : meta.plot;
-        lines.push(`📝 <b>Plot:</b>`);
-        lines.push(`<i>${escapeHtml(plot)}</i>`);
-        lines.push('');
-    }
     
     lines.push(`<a href="${selected.link}">🔗 View on JAV Database</a>`);
     
@@ -91,11 +83,42 @@ async function sendProgress(ctx, step, message) {
         'done': '✅'
     };
     const icon = steps[step] || '⏳';
+    const text = `${icon} <b>${message}</b>`;
     try {
-        await ctx.reply(`${icon} <b>${message}</b>`, { parse_mode: 'HTML' });
+        ctx.session = ctx.session || {};
+        const chatId = ctx.chat && ctx.chat.id;
+
+        // If we have a stored progress message for this chat, try to edit it
+        if (ctx.session.progressMessage && ctx.session.progressMessage.chatId === chatId && ctx.session.progressMessage.messageId) {
+            try {
+                await ctx.telegram.editMessageText(chatId, ctx.session.progressMessage.messageId, null, text, { parse_mode: 'HTML' });
+                // If this is a final step, clear stored message
+                if (step === 'done') delete ctx.session.progressMessage;
+                return;
+            } catch (e) {
+                // Fall through to sending a fresh message if edit fails
+                console.error('Progress edit failed, sending new message:', e.message);
+            }
+        }
+
+        // Send new message and store its id for future edits
+        const sent = await ctx.reply(text, { parse_mode: 'HTML' });
+        if (sent && sent.message_id) {
+            ctx.session.progressMessage = { chatId, messageId: sent.message_id };
+            // schedule auto-delete
+            scheduleDelete(ctx.telegram, chatId, sent.message_id, AUTO_DELETE_SECONDS);
+            if (step === 'done') delete ctx.session.progressMessage;
+        }
     } catch (e) {
         console.error('Progress notification failed:', e.message);
     }
+}
+
+function scheduleDelete(telegram, chatId, messageId, ttl = AUTO_DELETE_SECONDS) {
+    if (!telegram || !chatId || !messageId) return;
+    setTimeout(() => {
+        try { telegram.deleteMessage(chatId, messageId).catch(() => {}); } catch (e) {}
+    }, ttl * 1000);
 }
 // ✅ Export ALL functions at the END
 module.exports = {
@@ -104,4 +127,5 @@ module.exports = {
     formatHashtags,
     formatMessage,
     sendProgress
+    ,scheduleDelete
 };

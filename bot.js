@@ -33,8 +33,8 @@ if (process.env.PORT) {
 const { Telegraf, session, Markup } = require('telegraf');
 const config = require('./config');
 const { startCommand, searchCommand, directCommand, queueCommand, statsCommand } = require('./commands');
-const { tagsCommand, tagSearchCommand } = require('./tagCommands');
-const { handleText, handleSearch, handleDirect, handleCallback } = require('./handlers');
+const { tagsCommand, tagSearchCommand, actressCommand, studioCommand } = require('./tagCommands');
+const { handleText, handleSearch, handleDirect, handleCallback, handleActressSelect } = require('./handlers');
 
 // Validate configuration
 config.validate();
@@ -51,6 +51,8 @@ bot.start(startCommand);
 bot.command('queue', queueCommand);
 bot.command('stats', statsCommand);
 bot.command('tags', tagsCommand);
+bot.command('actress', actressCommand);
+bot.command('studio', studioCommand);
 
 // Search command
 bot.command('search', async (ctx) => {
@@ -83,6 +85,10 @@ bot.on('callback_query', async (ctx) => {
         await ctx.answerCbQuery();
         const [, category, tagName] = data.split('_');
         await tagSearchCommand(ctx, category, tagName);
+    }
+    // Actress movie selection
+    else if (data.startsWith('selectactress_')) {
+        await handleActressSelect(ctx);
     }
     // Other callbacks (select_, refresh_, etc.)
     else {

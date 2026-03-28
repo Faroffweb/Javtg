@@ -1,8 +1,9 @@
 // commands.js
 const { Markup } = require('telegraf');
-const { escapeHtml } = require('./utils');
+const { escapeHtml, scheduleDelete } = require('./utils');
 const { getUserQueue, getQueueStats } = require('./queue');
 const config = require('./config');
+const { fetchSearch, fetchMovieMetadata } = require('./scraper');
 
 async function startCommand(ctx) {
     const isAdmin = config.ADMIN_IDS.includes(ctx.from.id);
@@ -13,6 +14,8 @@ async function startCommand(ctx) {
         `/start - This message\n` +
         `/search <code>&lt;query&gt;</code> - Search movies\n` +
         `/direct <code>&lt;url&gt;</code> - Fetch from URL\n` +
+        `/actress <code>&lt;name&gt;</code> - Search actresses\n` +
+        `/tags - Browse tags\n` +
         `/queue - View your queue status\n` +
         `/stats - Bot statistics ${isAdmin ? '' : '(Admin only)'}`;
     await ctx.reply(welcome, { parse_mode: 'HTML' });
@@ -63,7 +66,40 @@ async function statsCommand(ctx) {
 async function searchCommand(ctx) {
     const query = ctx.message.text.replace('/search', '').trim();
     if (!query) return ctx.reply('❌ Usage: /search <code>SONE-763</code>', { parse_mode: 'HTML' });
-    return query;
+
+    const results = await fetchSearch(query);
+    if (!results || results.length === 0) return ctx.reply('❌ No results found for your query.');
+
+    const items = results.slice(0, 10);
+    // fetch metadata to get DVD IDs
+    for (let item of items) {
+        try {
+            const meta = await fetchMovieMetadata(item.link);
+            item.code = meta.dvdId || meta.contentId || item.code;
+        } catch (e) {
+            // ignore per-item failures
+        }
+    }
+
+    let text = `🔍 <b>Search results</b> for <i>${escapeHtml(query)}</i>\n\n`;
+    items.forEach((it, i) => {
+        text += `${i + 1}. <code>${it.code || 'Unknown'}</code> - ${escapeHtml(it.title || '')}\n`;
+    });
+
+    const keyboard = items.map((it, i) => [Markup.button.callback(String(it.code || 'Unknown'), `select_${i}`)]);
+
+    // store into session for selection
+    ctx.session = ctx.session || {};
+    ctx.session.results = items;
+
+    const sent = await ctx.reply(text, {
+        parse_mode: 'HTML',
+        reply_markup: { inline_keyboard: keyboard }
+    });
+    if (sent && sent.message_id) scheduleDelete(ctx.telegram, sent.chat.id, sent.message_id);
+
+    // returned null to indicate we've handled showing results (bot.js won't call handleSearch)
+    return null;
 }
 
 async function directCommand(ctx) {

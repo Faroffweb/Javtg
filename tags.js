@@ -79,6 +79,21 @@ function getTags(category) {
         }, {});
 }
 
+// Search tags in a category by query
+function searchTags(category, query) {
+    const tags = loadTags();
+    if (!tags[category]) return {};
+    
+    const lowerQuery = query.toLowerCase();
+    return Object.entries(tags[category])
+        .filter(([tag]) => tag.toLowerCase().includes(lowerQuery))
+        .sort(([, a], [, b]) => b.count - a.count)
+        .reduce((obj, [key, value]) => {
+            obj[key] = value;
+            return obj;
+        }, {});
+}
+
 // Search movies by tag
 function searchByTag(category, tagName) {
     const tags = loadTags();
@@ -90,5 +105,6 @@ module.exports = {
     saveTags,
     addTag,
     getTags,
+    searchTags,
     searchByTag
 };
