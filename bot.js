@@ -32,7 +32,7 @@ if (process.env.PORT) {
 // bot.js
 const { Telegraf, session, Markup } = require('telegraf');
 const config = require('./config');
-const { startCommand, searchCommand, directCommand, queueCommand, statsCommand, autoStartCommand, autoStopCommand, autoStatusCommand } = require('./commands');
+const { startCommand, helpCommand, searchCommand, directCommand, queueCommand, statsCommand, actressListCommand, autoStartCommand, autoStopCommand, autoStatusCommand, autoIntervalCommand, autoDeleteCommand } = require('./commands');
 const { tagsCommand, tagSearchCommand, actressCommand, studioCommand } = require('./tagCommands');
 const { handleText, handleSearch, handleDirect, handleCallback, handleActressSelect } = require('./handlers');
 
@@ -48,14 +48,18 @@ bot.use(session());
 // ============================================================================
 
 bot.start(startCommand);
+bot.command('help', helpCommand);
 bot.command('queue', queueCommand);
 bot.command('stats', statsCommand);
 bot.command('tags', tagsCommand);
 bot.command('actress', actressCommand);
+bot.command('actresslist', actressListCommand);
 bot.command('studio', studioCommand);
 bot.command('autostart', autoStartCommand);
 bot.command('autostop', autoStopCommand);
 bot.command('autostatus', autoStatusCommand);
+bot.command('autointerval', autoIntervalCommand);
+bot.command('autodelete', autoDeleteCommand);
 
 // Search command
 bot.command('search', async (ctx) => {
@@ -89,8 +93,8 @@ bot.on('callback_query', async (ctx) => {
         const [, category, tagName] = data.split('_');
         await tagSearchCommand(ctx, category, tagName);
     }
-    // Actress movie selection
-    else if (data.startsWith('selectactress_')) {
+    // Actress movie selection + pageable actress results
+    else if (data.startsWith('selectactress_') || data.startsWith('selectstudio_') || data.startsWith('actresspage_')) {
         await handleActressSelect(ctx);
     }
     // Other callbacks (select_, refresh_, etc.)

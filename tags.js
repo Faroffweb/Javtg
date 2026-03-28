@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 const TAGS_FILE = path.join(__dirname, 'tags.json');
+const ACTRESS_LIST_FILE = path.join(__dirname, 'actresses.txt');
 
 // Load existing tags from file
 function loadTags() {
@@ -61,11 +62,29 @@ function addTag(category, tagName, movieInfo) {
     
     tags[category][tagName].lastUpdated = new Date().toISOString();
     saveTags(tags);
+
+    if (category === 'actresses') {
+        saveActressList(tags);
+    }
     
     return tags[category][tagName];
 }
 
 // Get all tags in a category
+function saveActressList(tags) {
+    try {
+        const actresses = tags?.actresses ? Object.keys(tags.actresses).sort() : [];
+        fs.writeFileSync(ACTRESS_LIST_FILE, actresses.join('\n'), 'utf-8');
+    } catch (e) {
+        console.error('Failed to save actress list:', e.message);
+    }
+}
+
+function getAllActresses() {
+    const tags = loadTags();
+    return tags?.actresses ? Object.keys(tags.actresses).sort() : [];
+}
+
 function getTags(category) {
     const tags = loadTags();
     if (!tags[category]) return {};
@@ -105,6 +124,8 @@ module.exports = {
     saveTags,
     addTag,
     getTags,
+    getAllActresses,
+    saveActressList,
     searchTags,
     searchByTag
 };

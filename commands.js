@@ -4,7 +4,9 @@ const { escapeHtml, scheduleDelete } = require('./utils');
 const { getUserQueue, getQueueStats } = require('./queue');
 const config = require('./config');
 const { fetchSearch, fetchMovieMetadata } = require('./scraper');
-const { startAuto, stopAuto, autoStatus } = require('./task');
+const { startAuto, stopAuto, autoStatus, getAutoSession } = require('./task');
+const { getAllActresses } = require('./tags');
+const { showActressList } = require('./tagCommands');
 
 async function startCommand(ctx) {
     const isAdmin = config.ADMIN_IDS.includes(ctx.from.id);
@@ -13,17 +15,29 @@ async function startCommand(ctx) {
         `Send a JAV ID (e.g. <code>SONE-763</code>) or title to search.\n\n` +
         `<b>Commands:</b>\n` +
         `/start - This message\n` +
+        `/help - This message (alias for start)\n` +
         `/search <code>&lt;query&gt;</code> - Search movies\n` +
         `/direct <code>&lt;url&gt;</code> - Fetch from URL\n` +
         `/actress <code>&lt;name&gt;</code> - Search actresses\n` +
+        `/actresslist - Show stored actress names\n` +
         `/studio <code>&lt;name&gt;</code> - Search studios\n` +
         `/tags - Browse tags\n` +
         `/queue - View your queue status\n` +
         `/stats - Bot statistics ${isAdmin ? '' : '(Admin only)'}\n` +
-        `/autostart <code>JUQ-001</code> - Start auto-sequential search\n` +
+        `/autostart <code>JUQ-001</code> [JUQ-100] [interval] - Start auto-sequential search/range\n` +
         `/autostop - Stop auto mode\n` +
-        `/autostatus - Auto mode status`;
+        `/autostatus - Auto mode status\n` +
+        `/autointerval <code>&lt;seconds&gt;</code> - Set auto search interval\n` +
+        `/autodelete <code>&lt;seconds&gt;</code> - Set auto delete for bot messages`;
     await ctx.reply(welcome, { parse_mode: 'HTML' });
+}
+
+async function helpCommand(ctx) {
+    return startCommand(ctx);
+}
+
+async function actressListCommand(ctx) {
+    return await showActressList(ctx, 0);
 }
 
 async function queueCommand(ctx) {
@@ -116,12 +130,57 @@ async function directCommand(ctx) {
     return url;
 }
 
-async function autoStartCommand(ctx) {
-    const query = ctx.message.text.replace('/autostart', '').trim();
-    if (!query) {
-        return ctx.reply('❌ Usage: /autostart <code>JUQ-001</code>', { parse_mode: 'HTML' });
+async function actressListCommand(ctx) {
+    const actresses = getAllActresses();
+    if (actresses.length === 0) {
+        return ctx.reply('❌ No actresses stored yet.', { parse_mode: 'HTML' });
     }
-    await startAuto(ctx.from.id, query, ctx);
+
+    const chunkSize = 100;
+    for (let i = 0; i < actresses.length; i += chunkSize) {
+        const chunk = actresses.slice(i, i + chunkSize);
+        await ctx.reply(`👥 <b>Actress list (${i + 1}-${Math.min(i + chunkSize, actresses.length)} / ${actresses.length})</b>\n\n${chunk.join('\n')}`, { parse_mode: 'HTML' });
+    }
+    return null;
+}
+
+async function autoStartCommand(ctx) {
+    const args = ctx.message.text.replace('/autostart', '').trim().split(/\s+/).filter(Boolean);
+    if (!args[0]) {
+        return ctx.reply('❌ Usage: /autostart <startCode> [endCode] [interval_seconds]', { parse_mode: 'HTML' });
+    }
+
+    const startCode = args[0];
+    let endCode = null;
+    let interval = null;
+
+    if (args[1]) {
+        const maybeNum = parseInt(args[1], 10);
+        if (!Number.isNaN(maybeNum)) {
+            interval = maybeNum;
+        } else {
+            endCode = args[1];
+        }
+    }
+
+    if (args[2]) {
+        const maybeNum = parseInt(args[2], 10);
+        if (!Number.isNaN(maybeNum)) {
+            interval = maybeNum;
+        }
+    }
+
+    if (interval !== null && (Number.isNaN(interval) || interval <= 0)) {
+        return ctx.reply('❌ Interval must be a positive number of seconds.', { parse_mode: 'HTML' });
+    }
+
+    // Persist interval for user session for /autointerval behavior
+    ctx.session = ctx.session || {};
+    if (interval !== null) {
+        ctx.session.autoIntervalSeconds = interval;
+    }
+
+    await startAuto(ctx.from.id, startCode, ctx, interval || (ctx.session.autoIntervalSeconds || null), endCode);
 }
 
 async function autoStopCommand(ctx) {
@@ -138,13 +197,46 @@ async function autoStatusCommand(ctx) {
     await autoStatus(ctx.from.id, ctx);
 }
 
+async function autoIntervalCommand(ctx) {
+    const arg = ctx.message.text.replace('/autointerval', '').trim();
+    const seconds = parseInt(arg, 10);
+    if (!arg || Number.isNaN(seconds) || seconds <= 0) {
+        return ctx.reply('❌ Usage: /autointerval <seconds> (example: /autointerval 30)', { parse_mode: 'HTML' });
+    }
+    ctx.session = ctx.session || {};
+    ctx.session.autoIntervalSeconds = seconds;
+
+    const session = getAutoSession(ctx.from.id);
+    if (session && session.active) {
+        session.intervalMs = seconds * 1000;
+    }
+
+    return ctx.reply(`✅ Auto interval set to ${seconds}s.`, { parse_mode: 'HTML' });
+}
+
+async function autoDeleteCommand(ctx) {
+    const arg = ctx.message.text.replace('/autodelete', '').trim();
+    const seconds = parseInt(arg, 10);
+    if (!arg || Number.isNaN(seconds) || seconds <= 0) {
+        return ctx.reply('❌ Usage: /autodelete <seconds> (example: /autodelete 60)', { parse_mode: 'HTML' });
+    }
+    ctx.session = ctx.session || {};
+    ctx.session.autoDeleteSeconds = seconds;
+
+    return ctx.reply(`✅ Auto-delete timeout set to ${seconds}s for your next progress messages.`, { parse_mode: 'HTML' });
+}
+
 module.exports = {
     startCommand,
+    helpCommand,
     queueCommand,
     statsCommand,
     searchCommand,
     directCommand,
+    actressListCommand,
     autoStartCommand,
     autoStopCommand,
-    autoStatusCommand
+    autoStatusCommand,
+    autoIntervalCommand,
+    autoDeleteCommand
 };

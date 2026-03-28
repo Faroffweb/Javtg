@@ -34,14 +34,23 @@ npm run dev
 ```
 
 Bot commands
-- `/start` — help message.
-- `/search <query>` — search movies by ID/title.
-- `/direct <url>` — fetch from a full movie URL.
-- `/actress <name>` — search actress, show movies, select by video ID.
-- `/studio <name>` — search studio, show movies, select by video ID.
-- `/tags [category]` — list popular tags (genres, actresses, studios, series).
-- `/queue` — show your queue status.
-- `/stats` — admin-only stats.
+
+| Command | Description |
+|---|---|
+| start | help message |
+| search <query> | search movies by ID/title |
+| direct <url> | fetch from a full movie URL |
+| actress <name> | search actress, show movies, select by video ID |
+| studio <name> | search studio, show movies, select by video ID |
+| tags [category] | list popular tags (genres, actresses, studios, series) |
+| queue | show your queue status |
+| stats | admin-only stats |
+| help | show help message |
+| autostart <startCode> [endCode] [interval] | start auto-sequential search range (e.g. JUQ-001 JUQ-100 30), interval sec |
+| autostop | stop auto mode |
+| autostatus | show auto mode status |
+| autointerval <seconds> | set the auto-search interval for your session |
+| autodelete <seconds> | set auto-delete lifespan for progress messages |
 
 Notes & troubleshooting
 - The bot scrapes only `javdatabase.com` (external links are ignored).

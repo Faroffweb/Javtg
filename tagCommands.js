@@ -1,8 +1,8 @@
 // tagCommands.js
 const { Markup } = require('telegraf');
-const { getTags, searchTags, searchByTag } = require('./tags');
+const { getTags, searchTags, searchByTag, getAllActresses } = require('./tags');
 const { escapeHtml, scheduleDelete } = require('./utils');
-const { fetchSearchIdols, fetchIdolMovies, fetchMovieMetadata, fetchSearchStudios } = require('./scraper');
+const { fetchSearchIdols, fetchIdolMoviesAll, fetchMovieMetadata, fetchSearchStudios } = require('./scraper');
 
 async function tagsCommand(ctx) {
     const category = ctx.message.text.split(' ')[1] || 'genres';
@@ -91,35 +91,102 @@ async function tagSearchCommand(ctx, category, tagName) {
     if (sent && sent.message_id) scheduleDelete(ctx.telegram, sent.chat.id, sent.message_id);
 }
 
-async function showIdolMovies(ctx, idol) {
-    let movies = await fetchIdolMovies(idol.link);
-    movies = movies.slice(0, 10); // Limit to 10 for performance
-    
+async function showActressList(ctx, page = 0) {
+    ctx.session = ctx.session || {};
+    const actresses = getAllActresses();
+    if (actresses.length === 0) {
+        return ctx.reply('❌ No actresses stored yet.', { parse_mode: 'HTML' });
+    }
+
+    const perPage = 15;
+    const total = actresses.length;
+    const start = page * perPage;
+    const end = Math.min(start + perPage, total);
+    const pageSlice = actresses.slice(start, end);
+
+    const keyboard = pageSlice.map((name, idx) => [{
+        text: name,
+        callback_data: `actresslistselect_${start + idx}`
+    }]);
+
+    const navRow = [];
+    if (page > 0) navRow.push(Markup.button.callback('◀ Prev', `actresslistpage_${page - 1}`));
+    if (end < total) navRow.push(Markup.button.callback('Next ▶', `actresslistpage_${page + 1}`));
+    if (navRow.length > 0) keyboard.push(navRow);
+    keyboard.push([Markup.button.callback('✖ Cancel', 'cancelactresslist')]);
+
+    ctx.session.actressList = actresses;
+    ctx.session.actressListPage = page;
+
+    const text = `👥 <b>Actresses</b> (${start + 1}-${end} of ${total})\n\nSelect an actress to load her movies:`;
+    const sent = await ctx.reply(text, {
+        parse_mode: 'HTML',
+        reply_markup: { inline_keyboard: keyboard }
+    });
+    if (sent && sent.message_id) scheduleDelete(ctx.telegram, sent.chat.id, sent.message_id);
+}
+
+async function searchAndShowActress(ctx, actressName) {
+    const idols = await fetchSearchIdols(actressName);
+    if (!idols || idols.length === 0) {
+        return ctx.reply(`❌ No actress found for: ${actressName}`, { parse_mode: 'HTML' });
+    }
+    const idol = idols[0];
+    await showIdolMovies(ctx, idol);
+}
+
+async function showIdolMovies(ctx, idol, page = 0) {
+    ctx.session = ctx.session || {};
+    const perPage = 10;
+
+    // If no cached movies for this idol or idol changed, fetch all pages
+    if (!ctx.session.tagResults || (ctx.session.currentIdol && ctx.session.currentIdol.link !== idol.link)) {
+        const allMovies = await fetchIdolMoviesAll(idol.link);
+        ctx.session.tagResults = allMovies;
+        ctx.session.currentIdol = idol;
+    }
+
+    const movies = ctx.session.tagResults || [];
     if (movies.length === 0) {
         return ctx.reply(`❌ No movies found for ${idol.name}`);
     }
-    
-    // Fetch actual DVD IDs for accurate button text
-    for (let m of movies) {
-        const meta = await fetchMovieMetadata(m.link);
-        m.code = meta.dvdId || meta.contentId || m.code;
+
+    const start = page * perPage;
+    const subMovies = movies.slice(start, start + perPage);
+    if (subMovies.length === 0) {
+        return ctx.reply('⚠️ No more results.', { parse_mode: 'HTML' });
     }
-    
-    let text = `👥 <b>${idol.name}</b>\n\nClick a video ID to search and upload:\n\n`;
-    
-    // Create inline keyboard for movie codes (vertical list: one button per row)
-    const keyboard = movies.map((m, idx) => [{
+
+    // Fetch actual DVD IDs for accurate button text (only page slice)
+    for (let idx = 0; idx < subMovies.length; idx++) {
+        const m = subMovies[idx];
+        const meta = await fetchMovieMetadata(m.link);
+        m.code = meta.dvdId || meta.contentId || m.code || `Result ${start + idx + 1}`;
+    }
+
+    const total = movies.length;
+    const end = Math.min(start + perPage, total);
+    let text = `👥 <b>${idol.name}</b>\n\nShowing ${start + 1}-${end} of ${total} movies.\n\nClick a video ID to search and upload:\n\n`;
+
+    const keyboard = subMovies.map((m, idx) => [{
         text: String(m.code || 'Unknown'),
-        callback_data: `selectactress_${idx}`
+        callback_data: `selectactress_${start + idx}`
     }]);
 
-    // debug: ensure keyboard built
-    console.log('showIdolMovies:', idol.name, 'movies:', movies.length, 'keyboard rows:', keyboard.length);
-    
-    // Store movies in session for selection
-    ctx.session = ctx.session || {};
+    const navRow = [];
+    if (page > 0) navRow.push(Markup.button.callback('◀ Prev', `actresspage_${page - 1}`));
+    if (end < total) navRow.push(Markup.button.callback('Next ▶', `actresspage_${page + 1}`));
+    if (navRow.length) keyboard.push(navRow);
+
+    // Add cancel button row
+    keyboard.push([Markup.button.callback('✖ Cancel', 'cancelactress')]);
+
+    console.log('showIdolMovies:', idol.name, 'movies total:', total, 'page:', page, 'rows:', keyboard.length);
+
     ctx.session.tagResults = movies;
-    
+    ctx.session.currentIdol = idol;
+    ctx.session.currentPage = page;
+
     const sent = await ctx.reply(text, {
         parse_mode: 'HTML',
         reply_markup: { inline_keyboard: keyboard }
@@ -131,6 +198,8 @@ module.exports = {
     tagsCommand,
     tagSearchCommand,
     actressCommand,
+    showActressList,
+    searchAndShowActress,
     showIdolMovies,
     studioCommand
 };

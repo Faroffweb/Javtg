@@ -2,6 +2,7 @@
 const { addToQueue, processNextInQueue } = require('./queue');
 const { sendProgress, escapeHtml, scheduleDelete } = require('./utils');
 const { fetchSearch, fetchPosterUrl, downloadImageBytes } = require('./scraper');
+const { showIdolMovies, showActressList, searchAndShowActress } = require('./tagCommands');
 const { processTask } = require('./task');
 const config = require('./config');
 
@@ -132,6 +133,43 @@ async function handleActressSelect(ctx) {
             await ctx.editMessageText(`🔍 Searching: <code>${sel.code || sel.dvdId}</code>`, { parse_mode: 'HTML' });
             await handleSearch(ctx, sel.code || sel.dvdId);
         }
+    }
+    else if (data.startsWith('actresspage_')) {
+        const page = parseInt(data.split('_')[1]);
+        const idol = ctx.session?.currentIdol;
+        if (!idol) {
+            await ctx.reply('⚠️ Idol data lost. Please run /actress <name> again.');
+            return;
+        }
+        await showIdolMovies(ctx, idol, page);
+    }
+    else if (data.startsWith('actresslistpage_')) {
+        const page = parseInt(data.split('_')[1]);
+        await showActressList(ctx, page);
+    }
+    else if (data.startsWith('actresslistselect_')) {
+        const idx = parseInt(data.split('_')[1]);
+        const list = ctx.session?.actressList || [];
+        const name = list[idx];
+        if (!name) {
+            return ctx.reply('⚠️ Actress context lost. Please run /actresslist again.');
+        }
+        await searchAndShowActress(ctx, name);
+    }
+    else if (data === 'cancelactresslist') {
+        if (ctx.session) {
+            delete ctx.session.actressList;
+            delete ctx.session.actressListPage;
+        }
+        await ctx.reply('❌ Actress list canceled.', { parse_mode: 'HTML' });
+    }
+    else if (data === 'cancelactress') {
+        if (ctx.session) {
+            delete ctx.session.tagResults;
+            delete ctx.session.currentIdol;
+            delete ctx.session.currentPage;
+        }
+        await ctx.reply('❌ Selection canceled. You can start again with /actress or /studio.', { parse_mode: 'HTML' });
     }
 }
 

@@ -195,6 +195,76 @@ async function fetchSearchIdols(query) {
     }
 }
 
+function resolveUrl(base, href) {
+    try {
+        return new URL(href, base).href;
+    } catch (e) {
+        return null;
+    }
+}
+
+function parsePageNumber(url) {
+    try {
+        const u = new URL(url);
+        if (u.searchParams.has('paged')) return parseInt(u.searchParams.get('paged'), 10) || 1;
+        if (u.searchParams.has('page')) return parseInt(u.searchParams.get('page'), 10) || 1;
+        let m = u.pathname.match(/(?:page|paged)\/(\d+)\/?$/i);
+        if (m) return parseInt(m[1], 10) || 1;
+        m = u.pathname.match(/\/(\d+)\/?$/); // fallback for /prestige/2/
+        if (m) return parseInt(m[1], 10) || 1;
+        return 1;
+    } catch (e) {
+        return 1;
+    }
+}
+
+function findNextPageUrl(html, currentUrl) {
+    const nextSelectors = [
+        /<a[^>]+rel="next"[^>]*href="([^"]+)"/i,
+        /<link[^>]+rel="next"[^>]*href="([^"]+)"/i,
+        /<a[^>]+class="[^"]*(?:next|nav-next|page-numbers next|next page-numbers)[^"]*"[^>]*href="([^"]+)"/i,
+        /<a[^>]+href="([^"]+)"[^>]*>\s*(?:Next|next|›|»|→)\s*<\/a>/i
+    ];
+
+    for (const sel of nextSelectors) {
+        const match = html.match(sel);
+        if (match) {
+            const candidate = match[1].trim();
+            const resolved = resolveUrl(currentUrl, candidate);
+            if (resolved) return resolved;
+        }
+    }
+
+    const pages = [];
+    for (const m of html.matchAll(/<a[^>]+href="([^"]+)"[^>]*>\s*(\d+)\s*<\/a>/ig)) {
+        const href = m[1];
+        const num = parseInt(m[2], 10);
+        if (!Number.isNaN(num)) {
+            const resolved = resolveUrl(currentUrl, href.trim());
+            if (resolved) pages.push({ num, href: resolved });
+        }
+    }
+    if (pages.length === 0) {
+        // last fallback: try link rel=next in case no normal pagination numbers
+        const relNext = html.match(/<link[^>]+rel="next"[^>]*href="([^"]+)"/i);
+        if (relNext) {
+            const resolved = resolveUrl(currentUrl, relNext[1].trim());
+            if (resolved) return resolved;
+        }
+        return null;
+    }
+    if (pages.length === 0) return null;
+
+    const uniquePages = Array.from(new Map(pages.map(p => [p.href, p])).values());
+    uniquePages.sort((a, b) => a.num - b.num);
+
+    const currentPage = parsePageNumber(currentUrl);
+    const nextPage = uniquePages.find(p => p.num === currentPage + 1);
+    if (nextPage) return nextPage.href;
+
+    return uniquePages.find(p => p.num > currentPage)?.href || null;
+}
+
 async function fetchSearchStudios(query) {
     try {
         const resp = await client.get(`https://www.javdatabase.com/?post_type=studios&s=${encodeURIComponent(query)}`);
@@ -225,53 +295,73 @@ async function fetchSearchStudios(query) {
 }
 
 async function fetchIdolMovies(idolUrl) {
-    try {
-        const resp = await client.get(idolUrl);
-        const html = resp.data || '';
-        const results = [];
-        const cardPattern = /<div[^>]+class="[^"]*\bcard\b[^"]*\bborderlesscard\b[^"]*"[^>]*>(.*?)<\/div>/gis;
-        let cardMatch;
-        while ((cardMatch = cardPattern.exec(html)) !== null) {
-            const block = cardMatch[1];
-            let code = null, link = null, title = null, releaseDate = null;
-            const codeMatch = block.match(/<p[^>]+class="[^"]*\bpcard\b[^"]*"[^>]*>.*?<a[^>]+href="([^"]+)"[^>]*>(.*?)<\/a>/is);
-            if (codeMatch) { link = codeMatch[1]; code = cleanHtmlText(codeMatch[2]); }
-            // Normalize and restrict to javdatabase domain only
-            if (link) {
-                link = link.trim();
-                if (link.startsWith('/')) {
-                    link = `https://www.javdatabase.com${link}`;
+    const results = [];
+    const seenUrls = new Set();
+    const seenPages = new Set();
+    let nextUrl = idolUrl;
+    let attempt = 0;
+
+    while (nextUrl && attempt < 60) {
+        attempt += 1;
+        try {
+            const resp = await client.get(nextUrl);
+            const html = resp.data || '';
+            seenPages.add(nextUrl);
+
+            const cardPattern = /<div[^>]+class="[^"]*\bcard\b[^"]*\bborderlesscard\b[^"]*"[^>]*>(.*?)<\/div>/gis;
+            let cardMatch;
+            while ((cardMatch = cardPattern.exec(html)) !== null) {
+                const block = cardMatch[1];
+                let code = null, link = null, title = null, releaseDate = null;
+                const codeMatch = block.match(/<p[^>]+class="[^"]*\bpcard\b[^"]*"[^>]*>.*?<a[^>]+href="([^"]+)"[^>]*>(.*?)<\/a>/is);
+                if (codeMatch) { link = codeMatch[1]; code = cleanHtmlText(codeMatch[2]); }
+                if (link) {
+                    link = link.trim();
+                    if (link.startsWith('/')) link = `https://www.javdatabase.com${link}`;
+                    if (!link.includes('javdatabase.com')) continue;
                 }
-                // Skip any external links not on javdatabase.com
-                if (!link.includes('javdatabase.com')) {
-                    continue;
+                const titleBlock = block.match(/<(?:div|p|span)[^>]+class="[^"]*\bmt-auto\b[^"]*"[^>]*>(.*?)<\/(?:div|p|span)>/is);
+                if (titleBlock) {
+                    const t = titleBlock[1].match(/<a[^>]*>(.*?)<\/a>/i);
+                    if (t) title = cleanHtmlText(t[1]);
+                }
+                if (!title) title = code;
+                const dateMatch = cleanHtmlText(block).match(/(\d{4}-\d{2}-\d{2})/);
+                if (dateMatch) releaseDate = dateMatch[1];
+
+                if (link && !seenUrls.has(link)) {
+                    seenUrls.add(link);
+                    results.push({ code, title, link, date: releaseDate });
                 }
             }
-            const titleBlock = block.match(/<(?:div|p|span)[^>]+class="[^"]*\bmt-auto\b[^"]*"[^>]*>(.*?)<\/(?:div|p|span)>/is);
-            if (titleBlock) {
-                const t = titleBlock[1].match(/<a[^>]*>(.*?)<\/a>/i);
-                if (t) title = cleanHtmlText(t[1]);
+
+            let nextUrlCandidate = findNextPageUrl(html, nextUrl);
+            if (!nextUrlCandidate) {
+                let nextMatch = html.match(/<a[^>]+class="[^"]*next[^"]*"[^>]*href="([^"]+)"/i);
+                if (!nextMatch) nextMatch = html.match(/<a[^>]+href="([^"]+)"[^>]*>\s*(?:Next|next|»|›)\s*<\/a>/i);
+                if (nextMatch) {
+                    nextUrlCandidate = nextMatch[1].trim();
+                    if (nextUrlCandidate.startsWith('/')) nextUrlCandidate = `https://www.javdatabase.com${nextUrlCandidate}`;
+                    if (!nextUrlCandidate.startsWith('http')) nextUrlCandidate = `https://www.javdatabase.com/${nextUrlCandidate}`;
+                }
             }
-            if (!title) title = code;
-            const dateMatch = cleanHtmlText(block).match(/(\d{4}-\d{2}-\d{2})/);
-            if (dateMatch) releaseDate = dateMatch[1];
-            results.push({ code, title, link, date: releaseDate });
+
+            if (!nextUrlCandidate || seenPages.has(nextUrlCandidate)) break;
+            nextUrl = nextUrlCandidate;
+
+        } catch (e) {
+            console.error('Idol movies page error:', e.message);
+            break;
         }
-        // Remove duplicates and ensure valid javdatabase links
-        const seen = new Set();
-        const filtered = [];
-        for (const r of results) {
-            if (!r.link) continue;
-            const key = r.link;
-            if (seen.has(key)) continue;
-            seen.add(key);
-            filtered.push(r);
-        }
-        return filtered;
-    } catch (e) {
-        console.error('Idol movies error:', e.message);
-        return [];
     }
+
+    return results;
+}
+
+async function fetchIdolMoviesAll(idolUrl) {
+    // for backward compatibility this currently just calls fetchIdolMovies
+    // (same implementation now includes pagination but this alias exists for clarity)
+    return await fetchIdolMovies(idolUrl);
 }
 
 module.exports = {
@@ -282,5 +372,6 @@ module.exports = {
     downloadImageBytes,
     fetchSearchIdols,
     fetchSearchStudios,
-    fetchIdolMovies
+    fetchIdolMovies,
+    fetchIdolMoviesAll
 };

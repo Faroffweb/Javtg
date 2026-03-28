@@ -138,7 +138,8 @@ async function sendProgress(ctx, step, message) {
         if (sent && sent.message_id) {
             ctx.session.progressMessage = { chatId, messageId: sent.message_id };
             // schedule auto-delete
-            scheduleDelete(ctx.telegram, chatId, sent.message_id, AUTO_DELETE_SECONDS);
+            const deleteSeconds = (ctx.session && ctx.session.autoDeleteSeconds) || AUTO_DELETE_SECONDS;
+            scheduleDelete(ctx.telegram, chatId, sent.message_id, deleteSeconds);
             if (step === 'done') delete ctx.session.progressMessage;
         }
     } catch (e) {

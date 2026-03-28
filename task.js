@@ -6,7 +6,7 @@ const { addToQueue, completeTask, processNextInQueue, getUserQueue } = require('
 const { escapeHtml } = require('./utils');
 const config = require('./config');
 
-const AUTO_INTERVAL_MS = 30 * 1000;
+const DEFAULT_AUTO_INTERVAL_MS = 30 * 1000;
 const AUTO_RETRY_DELAY_MS = 5 * 1000;
 const AUTO_MAX_RETRIES = 1;
 
@@ -53,11 +53,19 @@ async function scheduleAutoNext(ctx, userId, success) {
 
     // Determine next query
     const nextQuery = formatAutoCode(session.prefix, session.number, session.width);
-    const delay = success || session.retryCount === 0 ? AUTO_INTERVAL_MS : AUTO_RETRY_DELAY_MS;
+    const intervalMs = session.intervalMs || DEFAULT_AUTO_INTERVAL_MS;
+    const delay = success || session.retryCount === 0 ? intervalMs : AUTO_RETRY_DELAY_MS;
 
     if (session.timer) {
         clearTimeout(session.timer);
         session.timer = null;
+    }
+
+    // Stop if we have reached endNumber (after counting this failed/success transition)
+    if (session.endNumber && session.number > session.endNumber) {
+        await ctx.reply(`✅ Auto-search range complete at <code>${formatAutoCode(session.prefix, session.endNumber, session.width)}</code>.`, { parse_mode: 'HTML' });
+        stopAuto(userId);
+        return;
     }
 
     session.timer = setTimeout(async () => {
@@ -87,14 +95,37 @@ async function autoSearchEnqueue(ctx, userId, query) {
     }
 }
 
-async function startAuto(userId, code, ctx) {
+async function startAuto(userId, code, ctx, intervalSeconds = null, endCode = null) {
     const parsed = parseAutoCode(code);
     if (!parsed) {
         await ctx.reply('❌ Invalid code format. Use like <code>JUQ-001</code>.', { parse_mode: 'HTML' });
         return false;
     }
 
+    let endSession = null;
+    if (endCode) {
+        const parsedEnd = parseAutoCode(endCode);
+        if (!parsedEnd) {
+            await ctx.reply('❌ Invalid end code format. Use like <code>JUQ-050</code>.', { parse_mode: 'HTML' });
+            return false;
+        }
+        if (parsedEnd.prefix !== parsed.prefix) {
+            await ctx.reply('❌ Start and end codes must share the same prefix.', { parse_mode: 'HTML' });
+            return false;
+        }
+        if (parsedEnd.number < parsed.number) {
+            await ctx.reply('❌ End code must be greater than or equal to start code.', { parse_mode: 'HTML' });
+            return false;
+        }
+        endSession = parsedEnd.number;
+    }
+
     stopAuto(userId); // reset state
+
+    let intervalMs = DEFAULT_AUTO_INTERVAL_MS;
+    if (intervalSeconds !== null && !Number.isNaN(intervalSeconds) && intervalSeconds > 0) {
+        intervalMs = intervalSeconds * 1000;
+    }
 
     autoSessions.set(userId, {
         active: true,
@@ -102,11 +133,15 @@ async function startAuto(userId, code, ctx) {
         number: parsed.number,
         width: parsed.width,
         retryCount: 0,
-        timer: null
+        timer: null,
+        intervalMs,
+        endNumber: endSession
     });
 
-    await ctx.reply(`✅ Auto-search started from <code>${formatAutoCode(parsed.prefix, parsed.number, parsed.width)}</code>.`, { parse_mode: 'HTML' });
-    await autoSearchEnqueue(ctx, userId, formatAutoCode(parsed.prefix, parsed.number, parsed.width));
+    let startedFrom = formatAutoCode(parsed.prefix, parsed.number, parsed.width);
+    let rangeNote = endSession ? ` until ${formatAutoCode(parsed.prefix, endSession, parsed.width)}` : '';
+    await ctx.reply(`✅ Auto-search started from <code>${startedFrom}</code>${rangeNote} with interval ${Math.round(intervalMs / 1000)}s.`, { parse_mode: 'HTML' });
+    await autoSearchEnqueue(ctx, userId, startedFrom);
     return true;
 }
 
@@ -128,10 +163,20 @@ async function autoStatus(userId, ctx) {
         await ctx.reply('⛔ Auto-search is not running for you. Use /autostart <code>JUQ-001</code>.', { parse_mode: 'HTML' });
         return;
     }
-    await ctx.reply(`🤖 Auto-search is active. Next code: <code>${formatAutoCode(session.prefix, session.number, session.width)}</code>.`, { parse_mode: 'HTML' });
+    const intervalSeconds = Math.round((session.intervalMs || DEFAULT_AUTO_INTERVAL_MS) / 1000);
+    const endText = session.endNumber ? ` until <code>${formatAutoCode(session.prefix, session.endNumber, session.width)}</code>` : '';
+    await ctx.reply(`🤖 Auto-search is active. Next code: <code>${formatAutoCode(session.prefix, session.number, session.width)}</code>${endText}. Interval: ${intervalSeconds}s.`, { parse_mode: 'HTML' });
 }
 
-async function processTask(ctx, task) {
+async function processTask(ctx, taskOrQuery, link = null, title = null) {
+    // Support object task and legacy call with query string
+    let task = null;
+    if (typeof taskOrQuery === 'object' && taskOrQuery !== null) {
+        task = taskOrQuery;
+    } else {
+        task = { query: taskOrQuery, link, title, type: 'search', auto: false };
+    }
+
     const userId = ctx.from.id;
     const userQueue = getUserQueue(userId);
     let success = false;
@@ -183,7 +228,7 @@ async function processTask(ctx, task) {
     }
 
     // Auto mode follow-up
-    if (task.auto && getAutoSession(userId) && getAutoSession(userId).active) {
+    if (task && task.auto && getAutoSession(userId) && getAutoSession(userId).active) {
         await scheduleAutoNext(ctx, userId, success);
     }
 
