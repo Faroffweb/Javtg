@@ -4,6 +4,7 @@ const { escapeHtml, scheduleDelete } = require('./utils');
 const { getUserQueue, getQueueStats } = require('./queue');
 const config = require('./config');
 const { fetchSearch, fetchMovieMetadata } = require('./scraper');
+const { startAuto, stopAuto, autoStatus } = require('./task');
 
 async function startCommand(ctx) {
     const isAdmin = config.ADMIN_IDS.includes(ctx.from.id);
@@ -15,9 +16,13 @@ async function startCommand(ctx) {
         `/search <code>&lt;query&gt;</code> - Search movies\n` +
         `/direct <code>&lt;url&gt;</code> - Fetch from URL\n` +
         `/actress <code>&lt;name&gt;</code> - Search actresses\n` +
+        `/studio <code>&lt;name&gt;</code> - Search studios\n` +
         `/tags - Browse tags\n` +
         `/queue - View your queue status\n` +
-        `/stats - Bot statistics ${isAdmin ? '' : '(Admin only)'}`;
+        `/stats - Bot statistics ${isAdmin ? '' : '(Admin only)'}\n` +
+        `/autostart <code>JUQ-001</code> - Start auto-sequential search\n` +
+        `/autostop - Stop auto mode\n` +
+        `/autostatus - Auto mode status`;
     await ctx.reply(welcome, { parse_mode: 'HTML' });
 }
 
@@ -111,10 +116,35 @@ async function directCommand(ctx) {
     return url;
 }
 
+async function autoStartCommand(ctx) {
+    const query = ctx.message.text.replace('/autostart', '').trim();
+    if (!query) {
+        return ctx.reply('❌ Usage: /autostart <code>JUQ-001</code>', { parse_mode: 'HTML' });
+    }
+    await startAuto(ctx.from.id, query, ctx);
+}
+
+async function autoStopCommand(ctx) {
+    const userId = ctx.from.id;
+    const stopped = stopAuto(userId);
+    if (stopped) {
+        await ctx.reply('🛑 Auto-search stopped.', { parse_mode: 'HTML' });
+    } else {
+        await ctx.reply('⚠️ Auto-search was not running.', { parse_mode: 'HTML' });
+    }
+}
+
+async function autoStatusCommand(ctx) {
+    await autoStatus(ctx.from.id, ctx);
+}
+
 module.exports = {
     startCommand,
     queueCommand,
     statsCommand,
     searchCommand,
-    directCommand
+    directCommand,
+    autoStartCommand,
+    autoStopCommand,
+    autoStatusCommand
 };

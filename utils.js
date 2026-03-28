@@ -34,6 +34,22 @@ function formatHashtags(items, prefix = '') {
         .join(' ');
 }
 
+function formatHashtagFromCode(id) {
+    if (!id) return null;
+    const match = String(id).trim().toUpperCase().match(/^([A-Z]+)[-_]?(\d*)$/);
+    return match ? `#${match[1]}` : null;
+}
+
+function formatHashtagFromActress(name) {
+    if (!name) return null;
+    const clean = String(name).trim()
+        .replace(/\s+/g, '')
+        .replace(/[^A-Za-z0-9_]/g, '')
+        .toLowerCase();
+    if (!clean) return null;
+    return `#${clean}`;
+}
+
 function formatMessage(meta, selected) {
     const lines = [];
     const title = escapeHtml(meta.title || selected.title || 'Unknown');
@@ -66,10 +82,26 @@ function formatMessage(meta, selected) {
     if (meta.genres) {
         lines.push(`🎭 <b>Genres:</b> ${escapeHtml(meta.genres)}`);
     }
+
+    // Auto hashtaging
+    const tagParts = [];
+    const videoTag = formatHashtagFromCode(meta.dvdId || meta.contentId || selected.code || selected.title);
+    if (videoTag) tagParts.push(videoTag);
+    if (meta.actresses) {
+        const actressTags = String(meta.actresses).split(',')
+            .map(a => formatHashtagFromActress(a))
+            .filter(Boolean);
+        if (actressTags.length) tagParts.push(...actressTags);
+    }
+
+    if (tagParts.length) {
+        lines.push('');
+        lines.push(`<b>🔖 Hashtags:</b> ${tagParts.join(' ')} `);
+    }
+
     lines.push('');
-    
     lines.push(`<a href="${selected.link}">🔗 View on JAV Database</a>`);
-    
+
     return lines.join('\n');
 }
 

@@ -32,7 +32,7 @@ if (process.env.PORT) {
 // bot.js
 const { Telegraf, session, Markup } = require('telegraf');
 const config = require('./config');
-const { startCommand, searchCommand, directCommand, queueCommand, statsCommand } = require('./commands');
+const { startCommand, searchCommand, directCommand, queueCommand, statsCommand, autoStartCommand, autoStopCommand, autoStatusCommand } = require('./commands');
 const { tagsCommand, tagSearchCommand, actressCommand, studioCommand } = require('./tagCommands');
 const { handleText, handleSearch, handleDirect, handleCallback, handleActressSelect } = require('./handlers');
 
@@ -53,6 +53,9 @@ bot.command('stats', statsCommand);
 bot.command('tags', tagsCommand);
 bot.command('actress', actressCommand);
 bot.command('studio', studioCommand);
+bot.command('autostart', autoStartCommand);
+bot.command('autostop', autoStopCommand);
+bot.command('autostatus', autoStatusCommand);
 
 // Search command
 bot.command('search', async (ctx) => {
